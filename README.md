@@ -1,93 +1,338 @@
-# p6_hyu424
+# P6 (5% of grade): Cassandra, Weather Data
 
-Project p6 of hyu424
+## Overview
 
-## Getting started
+NOAA (National Oceanic and Atmospheric Administration) collects
+weather data from all over the world.  In this project, you'll build
+an gRPC server that receives data (from some .py client, but imagine
+weather stations) and inserts it into a Cassandra table.  Your server
+will also let clients ask simple questions about the data.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+We'll also explore read/write availability tradeoffs.  When always
+want sensors to be able to upload data, but it is OK if we cannot
+always read the latest stats (we prefer an error over inconsistent
+results).
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Learning objectives:
 
-## Add your files
+* create Cassandra schemas involving partition keys and cluster keys
+* use Spark to preprocess data for insertion into Cassandra
+* configure queries to achieve a tradeoff between read and write availability
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+Before starting, please revisit the [general project directions](../projects.md).
+
+IMPORTANT: we'll be doing P6 on the [CSL VMs](../csl-vm).
+
+## Corrections/Clarifications
+
+* Nov 7: update server.py starter code
+* Nov 11: autograde.py and check_sub.py released
+* Nov 14: update the pandas version in Dockerfile (pandas is not a necessary library in this project)
+* Nov 14: you may not modify the Dockerfile, and we'll use the provided Dockerfile when grading.
+
+## Cluster Setup
+
+We provide the Dockerfile and docker-compose.yml for this project. You can run the following:
+
+* `docker build . -t p6-base`
+* `docker compose up -d`
+
+It will start three containers ('p6-db-1', 'p6-db-2', 'p6-db-3'). It generally takes around 1 to 2 minutes for the Cassandra cluster to be ready.  **Note that** you may not modify the Dockerfile.
+
+
+Run the following command:
 
 ```
-cd existing_repo
-git remote add origin https://git.doit.wisc.edu/cdis/cs/courses/cs544/f24/p6/p6_hyu424.git
-git branch -M main
-git push -uf origin main
+docker exec p6-db-1 nodetool status
 ```
 
-## Integrate with your tools
+and if the cluster is ready, it will produce an output like this:
 
-- [ ] [Set up project integrations](https://git.doit.wisc.edu/cdis/cs/courses/cs544/f24/p6/p6_hyu424/-/settings/integrations)
+```sh
+Datacenter: datacenter1
+=======================
+Status=Up/Down
+|/ State=Normal/Leaving/Joining/Moving
+--  Address     Load       Tokens  Owns (effective)  Host ID                               Rack 
+UN  172.27.0.4  70.28 KiB  16      64.1%             90d9e6d3-6632-4721-a78b-75d65c673db1  rack1
+UN  172.27.0.3  70.26 KiB  16      65.9%             635d1361-5675-4399-89fa-f5624df4a960  rack1
+UN  172.27.0.2  70.28 KiB  16      70.0%             8936a80e-c6b2-42ef-b54d-4160ff08857d  rack1
+```
 
-## Collaborate with your team
+If the cluster is not ready it will generally show an error. If this
+occurs then wait a little bit and rerun the command and keep doing so
+until you see that the cluster is ready.
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+## Part 1: Server Initialization
 
-## Test and Deploy
+### Communication
 
-Use the built-in continuous integration in GitLab.
+We provide the client programs and [src/station.proto](src/station.proto).
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+* Inside the [src/](src/) directory, four client programs (ClientStationSchema.py, ClientStationName.py, ClientRecordTemps.py, ClientStationMax.py) will communicate with with your server.py, via gRPC. We'll explain each RPC in details later.
+*  station.proto contains `rpc` and `message` entries to generate a gRPC stub (used by our clients).
 
-***
+Firstly, run the grpc_tools.protoc tool in p6-db-1 to generate stub code for our clients and servicer code for your server.
 
-# Editing this README
+```sh
+docker exec -w /src p6-db-1 sh -c "python3 -m grpc_tools.protoc -I=. --python_out=. --grpc_python_out=. station.proto"
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+**Your job is to finish writing the `StationService` class in the provided server.py (`StationService` overrides methods in the `StationServicer` class generated by the protoc tool).**
 
-## Suggestions for a good README
+In your server, you need to complete the `__init__` function and override four
+RPC methods for the StationService class.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**Note:** Don't delete `print("Server started")` in `StationService.__init__` or add any code after it in the constructor.  The autograder will watch for that print to know your server is ready.
 
-## Name
-Choose a self-explaining name for your project.
+If communication is working correctly so far, you should be able to start a server and used a client to get back a "TODO" error message via gRPC:
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```
+# in a terminal:
+docker exec -it -w /src p6-db-1 python3 server.py
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+# in a second terminal:
+docker exec -w /src p6-db-1 python3 ClientStationSchema.py
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+### Cassandra Schema
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Inside the `__init__` method, you firstly need to connect to the Cassandra cluster, with `Cluster(['p6-db-1', 'p6-db-2', 'p6-db-3'])`.  You can review how to connect here:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+https://git.doit.wisc.edu/cdis/cs/courses/cs544/f24/main/-/tree/main/lec/26-cassandra/demo/nb?ref_type=heads
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Write additional code using the session to run CQL queries to do the following:
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+* drop a `weather` keyspace if it already exists
+* create a `weather` keyspace with 3x replication
+* inside `weather`, create a `station_record` type containing two ints: `tmin` and `tmax`
+* inside `weather`, create a `stations` table
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+The `stations` table should have four columns: `id` (text), `name` (text), `date` (date), `record` (weather.station_record):
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+* `id` is a partition key and corresponds to a station's ID (like 'USC00470273')
+* `date` is a cluster key, ascending
+* `name` is a static field (because there is only one name per ID).  Example: 'UW ARBORETUM - MADISON'
+* `record` is a regular field because there will be many records per station partition.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+##### RPC - `StationSchema`:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Now you'll implement StationSchema function in StationService class. It should execute `describe table weather.stations` cassandra query and extract the `create_statement` from result.  
 
-## License
-For open source projects, say how it is licensed.
+Then, after restarting server.py, you should be able to use ClientStationSchema.py to make a client call:
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```
+docker exec -w /src p6-db-1 python3 ClientStationSchema.py
+```
+
+If your implementation is correct, the above command will print out something like this:
+
+```
+CREATE TABLE weather.stations (
+    id text,
+    date date,
+    name text static,
+    record station_record,
+    PRIMARY KEY (id, date)
+) WITH CLUSTERING ORDER BY (date ASC)
+    AND additional_write_policy = '99p'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND cdc = false
+    ...
+```
+
+### Spark Session
+
+Your constructor should also create a Spark session like this:
+
+```python
+self.spark = SparkSession.builder.appName("p6").getOrCreate()
+```
+
+This is a local Spark deployment, so you won't have separate Spark
+workers and a boss.  Instead, tasks run in the Spark driver for the
+session, so in the same container as your server.py.  This means local
+file paths will work, and you won't use HDFS for anything in this
+project.
+
+You'll use your Spark session in the next part to process a text file
+describing stations and insert that into your Cassandra table.
+
+## Part 2: Station Data (Per Partition)
+
+Your constructor should load data with Spark from [src/ghcnd-stations.txt](), then insert to Cassandra.  Note that we did some similar parsing of this same file during lecture:
+
+https://git.doit.wisc.edu/cdis/cs/courses/cs544/f24/main/-/blob/main/lec/20-spark/nb/lec1b.ipynb?ref_type=heads
+
+In your implementation, do the following:
+
+* Use Spark and `SUBSTRING` to extract `ID`, `STATE`, and `NAME` from `src/ghcnd-stations.txt`.  Reference the documentation to determine the offsets (this contains format descriptions for several different files, so be sure you're reading about the correct one):
+
+  https://www.ncei.noaa.gov/pub/data/ghcn/daily/readme.txt
+
+* Filter your results to the state of Wisconsin, and collect the rows so you can loop over them
+* Do an `INSERT` into your `weather.stations` table for each station ID and name. 
+
+##### RPC - `StationName`:
+
+You'll implement the `StationName` function in `StationService`
+class. The function should execute a Cassandra query and parse the
+result to obtain the name of a station for a specific station id. The
+station id is stored in `request.station` (refer to station.proto).
+
+Then, you can use ClientStationName.py to make a client call:
+
+```
+docker exec -w /src p6-db-1 python3 ClientStationName.py US1WIMR0003
+```
+
+If you did load station data and execute `StationName` correctly, it should print out "AMBERG 1.3 SW".
+
+## Part 3: Weather Data (Per Row)
+
+#### RPC - `RecordTemps`:
+
+Now you'll implement `RecordTemps` function in `StationService`
+class. It receives temperature data and writes it to
+`weather.stations`.
+
+The ClientRecordTemps.py pulls its data from src/weather.parquet.  You can run it as follows:
+
+```
+docker exec -w /src p6-db-1 python3 ClientRecordTemps.py
+```
+
+If you did RecordTemps correctly, it should print out a list of: `Inserted {station_id} on {date} with tmin={tmin} and tmax={tmax}`.
+
+#### RPC - `StationMax`:
+
+Similarly, You'll also implement `StationMax` RPC in server.py, which will return the maximum `tmax` ever seen for the given station.
+
+Then, you can use ClientStationMax.py to make a client call:
+
+```
+docker exec -w /src p6-db-1 python3 ClientStationMax.py USR0000WDDG
+```
+
+If you did RecordTemps and StationMax correctly, it will print out 344.
+
+## Part 4: Fault Tolerance
+
+### Error Handling
+
+Go back to `RecordTempsReply` and `StationMaxReply` and add some error
+handling code.  If there is a `cassandra.Unavailable` or
+`cassandra.cluster.NoHostAvailable` exception, the `error` field in
+the gRPC response should be "unavailable".
+
+If there are other exceptions besides these, return an error message
+of your choosing.  If the `error` field is set, it doesn't matter what
+number your `StationMax` returns for `tmax`.
+
+### Consistency Levels
+
+We want the server to be highly available for receiving writes.  Thus,
+we'll set W=1.  Choose an R so that R + W > RF.
+
+The thought is that real sensors might not have much space to save old
+data that hasn't been uploaded, so we want to accept writes whenever
+possible.  We also want to avoid a situation where a `StationMax`
+returns a smaller temperature than one previously added with
+`RecordTemps`; it would be better to return an error message if
+necessary.
+
+`RecordTempsReply` is a method that writes to the database (so it
+should be highly available) whereas `StationMaxReply` is a method that
+reads (so it is OK if it is unavailable if some replicas are down).
+
+The easiest way to implement your W and R settings in these methods is
+to modify your code to use prepared statements instead of doing
+queries directly.  If you have a prepared statement `prepared`, you can
+set the consistency level like this:
+
+```python
+from cassandra.query import ConsistencyLevel
+...
+prepared.consistency_level = ConsistencyLevel.????
+```
+
+You can fill in the missing code with `ConsistencyLevel.ONE`,
+`ConsistencyLevel.TWO`, or `ConsistencyLevel.THREE`.
+
+### Disaster Strikes
+
+**Important:** run a `docker` command to kill the `p6-db-2` container.
+
+Run the following command
+
+```
+docker exec p6-db-1 nodetool status
+```
+
+Verify that you see that one of the nodes is down before proceeding to the next steps.
+
+Call ClientRecordTemps.py again. Inserts should happen with `ConsistencyLevel.ONE`, so this ought to work, meaning the empty string is the expected result for `error`.
+
+Call ClientStationMax.py again. Reads should raises a cassandra.Unavailable except e, then the error should have a string like this:
+
+```
+unavailable
+```
+
+## Submission
+
+We will the run the following to prepare your submission:
+
+```
+# downloading main repo
+git clone https://git.doit.wisc.edu/cdis/cs/courses/cs544/f24/main.git
+
+# assuming your netid is bbadger, downloading your repo
+git clone https://git.doit.wisc.edu/cdis/cs/courses/cs544/f24/p6/p6_bbadger.git
+
+# copying everything from main/p6 to your repo (except src/server.py)
+rsync -av --exclude='src/server.py' main/p6/ p6_bbadger
+
+cd p6_bbadger
+```
+
+Then, we should be able to run the following on your submission to create the mini cluster:
+
+```
+docker build . -t p6-base
+docker compose up -d
+```
+
+After that, we will compile the proto files:
+
+```
+docker exec -w /src p6-db-1 sh -c "python3 -m grpc_tools.protoc -I=. --python_out=. --grpc_python_out=. station.proto "
+```
+
+Finally, we should the be able to launch your server like this, after the cluster is initialized:
+
+```
+docker exec -it p6-db-1 python3 /src/server.py
+```
+
+We should be able to find your server.py in src/ directory.
+
+## Testing:
+
+We would also be using an autograder to test your solution which you can run yourself by running the following command in the `p6` directory:
+
+```
+python3 autograde.py
+```
+
+This constitutes 90% of the total score. 
+The remaining 10% will be graded manually. 
+We will be checking your read and write consistency levels.
+
+Note that, autograder will generate a `server.out` file 
+which captures the stdout of your `server.py`. 
+This can be used for debugging.
+
+Finally, after pushing to GitLab, you should also run 
+`python3 check_sub.py` to check the correctness of your submission.
