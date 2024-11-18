@@ -2,9 +2,12 @@ import grpc
 from concurrent import futures
 import station_pb2
 import station_pb2_grpc
-from cassandra.cluster import Cluster
+from cassandra.cluster import Cluster, NoHostAvailable
+from cassandra.query import ConsistencyLevel
+from cassandra import Unavailable
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, expr
+
 
 
 class StationService(station_pb2_grpc.StationServicer):
@@ -84,26 +87,54 @@ class StationService(station_pb2_grpc.StationServicer):
         stat_date=request.date
         stat_tmax=request.tmax
         stat_tmin=request.tmin
-        
-        self.sess.execute("""
-        INSERT INTO weather.stations(id, date, record)
-        VALUES(%s, %s, {tmax: %s, tmin: %s})
-        """, (stat_id, stat_date, stat_tmax, stat_tmin))
-        
-        return station_pb2.RecordTempsReply(error="")
+
+        try:
+            prepared=self.sess.prepare("""
+            INSERT INTO weather.stations(id, date, record)
+            VALUES(?, ?, {tmax: ?, tmin: ?})
+            """)
+            prepared.consistency_level = ConsistencyLevel.ONE
+           # print(f"Debug: stat_id={stat_id}, stat_date={stat_date}, stat_tmax={stat_tmax}, stat_tmin={stat_tmin}")
+            
+            self.sess.execute(prepared,(stat_id, stat_date,stat_tmax,stat_tmin))
+            
+            
+            return station_pb2.RecordTempsReply(error="")
+
+        except Unavailable:
+
+            return station_pb2.RecordTempsReply(error="unavailable")
+        except NoHostAvailable:
+            return station_pb2.RecordTempsReply(error="unavailable")
+        except Exception as e:
+            return station_pb2.RecordTempsReply(error=f"error: {str(e)}")
 
 
     def StationMax(self, request, context):
         stat_id=request.station
-        result=self.sess.execute("""
-        select MAX(record.tmax) as max_temp
-        from weather.stations
-        where id= %s
-        """,(stat_id,))
-        row=result.one()
-        station_maxtemp=row.max_temp
 
-        return station_pb2.StationMaxReply(tmax=station_maxtemp, error="")
+        try:
+            prepared=self.sess.prepare("""
+            select MAX(record.tmax) as max_temp
+            from weather.stations
+            where id= ?
+            """)
+            prepared.consistency_level = ConsistencyLevel.THREE
+            result=self.sess.execute(prepared,(stat_id,))
+           
+            row=result.one()
+            station_maxtemp=row.max_temp
+        
+            return station_pb2.StationMaxReply(tmax=station_maxtemp, error="")
+        
+        except Unavailable:
+
+            return station_pb2.StationMaxReply(error="unavailable")
+        except NoHostAvailable:
+            return station_pb2.StationMaxReply(error="unavailable")
+        except Exception as e:
+            return station_pb2.StationMaxReply(error=f"error: {str(e)}")
+    
 
 def serve():
     server = grpc.server(
