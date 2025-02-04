@@ -70,8 +70,9 @@ To deploy the Weather Data Management System:
     If the cluster is not ready it will generally show an error. If this
     occurs then wait a little bit and rerun the command and keep doing so
     until you see that the cluster is ready.
+
     
-4. **Compile the proto files:**
+3. **Compile the proto files:**
     ```
     docker exec -w /src p6-db-1 sh -c "python3 -m grpc_tools.protoc -I=. --python_out=. --grpc_python_out=. station.proto "
     ```
