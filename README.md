@@ -106,24 +106,26 @@ To deploy the Weather Data Management System:
             ...
      ```
      
-  3. **RPC - StationName:** The function should execute a Cassandra query and parse the result to obtain the name of a station for a specific station id.
+  2. **RPC - StationName:** The function should execute a Cassandra query and parse the result to obtain the name of a station for a specific station id.
   The station id is stored in request.station (refer to station.proto).
-    ```
-    docker exec -w /src p6-db-1 python3 ClientStationName.py US1WIMR0003
-    ```
-  3. **RPC - RecordTemps:** RecordTemps function in StationService class. It receives temperature data and writes it to weather.stations.
+     ```
+        docker exec -w /src p6-db-1 python3 ClientStationName.py US1WIMR0003
+     ```
+     --> It will print out "AMBERG 1.3 SW".
+     
+  4. **RPC - RecordTemps:** RecordTemps function in StationService class. It receives temperature data and writes it to weather.stations.
      The ClientRecordTemps.py pulls its data from src/weather.parquet. You can run it as follows:
      ```
      docker exec -w /src p6-db-1 python3 ClientRecordTemps.py
      ```
-     It will print out a list of: Inserted {station_id} on {date} with tmin={tmin} and tmax={tmax}
+     --> It will print out a list of: Inserted {station_id} on {date} with tmin={tmin} and tmax={tmax}.
 
-  4. **RPC - StationMax:** StationMax RPC in server.py, which will return the maximum tmax ever seen for the given station.
+  5. **RPC - StationMax:** StationMax RPC in server.py, which will return the maximum tmax ever seen for the given station.
      Then, you can use ClientStationMax.py to make a client call:
      ```
      docker exec -w /src p6-db-1 python3 ClientStationMax.py USR0000WDDG
      ```
-     
+     -->  It will print out 344.
 ## Conclusion
 This project showcases the integration of modern technologies such as Cassandra, Docker, gRPC, and Spark to create a resilient and scalable weather data management system. It demonstrates my ability to design and implement complex data handling solutions that are robust and efficient under varied conditions.
   
