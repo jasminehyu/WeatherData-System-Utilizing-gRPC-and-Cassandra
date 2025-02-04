@@ -92,20 +92,21 @@ To deploy the Weather Data Management System:
      
      Result:
      ```
-    CREATE TABLE weather.stations (
-        id text,
-        date date,
-        name text static,
-        record station_record,
-        PRIMARY KEY (id, date)
-    ) WITH CLUSTERING ORDER BY (date ASC)
-        AND additional_write_policy = '99p'
-        AND bloom_filter_fp_chance = 0.01
-        AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
-        AND cdc = false
-        ...
-      ```
-  2. **RPC - StationName:** The function should execute a Cassandra query and parse the result to obtain the name of a station for a specific station id.
+        CREATE TABLE weather.stations (
+            id text,
+            date date,
+            name text static,
+            record station_record,
+            PRIMARY KEY (id, date)
+        ) WITH CLUSTERING ORDER BY (date ASC)
+            AND additional_write_policy = '99p'
+            AND bloom_filter_fp_chance = 0.01
+            AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+            AND cdc = false
+            ...
+     ```
+     
+  3. **RPC - StationName:** The function should execute a Cassandra query and parse the result to obtain the name of a station for a specific station id.
   The station id is stored in request.station (refer to station.proto).
     ```
     docker exec -w /src p6-db-1 python3 ClientStationName.py US1WIMR0003
