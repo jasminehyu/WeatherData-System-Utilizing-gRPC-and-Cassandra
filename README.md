@@ -88,7 +88,7 @@ To deploy the Weather Data Management System:
 - **Query Data:**
   Use provided client scripts to interact with the system and retrieve weather data.
 
-  Example:
+  Examples:
   1. **RPC - StationSchema:** Use ClientStationSchema.py to make a client call
      ```
      docker exec -w /src p6-db-1 python3 ClientStationSchema.py
