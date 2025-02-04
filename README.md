@@ -46,9 +46,11 @@ To deploy the Weather Data Management System:
    ```
    docker compose up -d
    ```
-   Note: It will start three containers ('p6-db-1', 'p6-db-2', 'p6-db-3'). It generally takes around 1 to 2 minutes for the Cassandra cluster to be ready.
+   Note: It will start three containers ('p6-db-1', 'p6-db-2', 'p6-db-3').
+   It generally takes around 1 to 2 minutes for the Cassandra cluster to be ready.
    
    Run the following command:
+   
    ```
    docker exec p6-db-1 nodetool status
    ```
